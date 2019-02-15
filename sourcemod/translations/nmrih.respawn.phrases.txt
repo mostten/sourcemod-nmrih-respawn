@@ -1,0 +1,20 @@
+"Phrases"
+{
+	"Admin Menu Item"
+	{
+		"en" "Respawn Player"
+		"chi" "复活玩家"
+	}
+
+	"Menu Title"
+	{
+		"en" "Respawn"
+		"chi" "复活玩家"
+	}
+
+	"Menu Item Respawn All"
+	{
+		"en" "All"
+		"chi" "全部玩家"
+	}
+}

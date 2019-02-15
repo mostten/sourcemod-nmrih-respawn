@@ -1,0 +1,15 @@
+"Games"
+{
+	"nmrih"
+	{
+		"Offsets"
+		{
+			"CNMRiH_ObjectiveGameRules::FPlayerCanRespawn"
+			{
+				// bool (CBasePlayer *)
+				"windows" "73"
+				"linux" "74"
+			}
+		}
+	}
+}
