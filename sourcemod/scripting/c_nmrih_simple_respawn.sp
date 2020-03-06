@@ -5,13 +5,10 @@
 #include <sdktools>
 #include <sdkhooks>
 #include <adminmenu>
-#include <dhooks>
 
 #define SPAWN_GRACE_MAX 99999
 
 TopMenu g_hTopMenu;
-
-Handle g_dhook_allow_late_join_spawning;
 
 ConVar g_hCvarsEnable;
 bool g_bEnable = true;
@@ -20,9 +17,6 @@ bool g_bCanRespawn[MAXPLAYERS + 1];
 
 ConVar sv_spawn_grace_objectivecount;
 int sv_spawn_grace_objectivecount_default;
-
-ConVar g_hCvarsSpawnTimeLimit;
-float g_fSpawnTimeLimit;
 
 public Plugin myinfo =
 {
@@ -39,12 +33,6 @@ public void OnPluginStart(){
 	InitConvars();
 	InitAdminMenu();
 	HookEvents();
-	LoadDHooks();
-	return;
-}
-
-public void OnMapStart(){
-	DHookGamerules(g_dhook_allow_late_join_spawning, true);
 	return;
 }
 
@@ -80,10 +68,6 @@ void InitConvars(){
 	g_hCvarsEnable = CreateConVar("nmrih_simple_respawn_enable", g_bEnable?"1":"0", "Allow users to use the Respawn:1.Enable 0.Disable", 0, true, 0.0, true, 1.0);
 	g_hCvarsEnable.AddChangeHook(OnConVarChanged);
 	g_bEnable = g_hCvarsEnable.BoolValue;
-	
-	g_hCvarsSpawnTimeLimit = CreateConVar("nmrih_simple_respawn_time_limit", "1.0", "The next respawn time", 0, true, 0.0, true, 99999.0);
-	g_hCvarsSpawnTimeLimit.AddChangeHook(OnConVarChanged);
-	g_fSpawnTimeLimit = g_hCvarsSpawnTimeLimit.FloatValue;
 	return;
 }
 
@@ -108,29 +92,6 @@ public void OnAdminMenuReady(Handle aTopMenu){
 	return;
 }
 
-void LoadDHooks(){
-	Handle gameconf = LoadGameConfigFile("respawn.nmrih.games");
-	if(!gameconf){
-		SetFailState("Failed to load respawn.nmrih.games.txt.");
-		return;
-	}
-	int offset = GameConfGetOffsetOrFail(gameconf, "CNMRiH_ObjectiveGameRules::FPlayerCanRespawn");
-	g_dhook_allow_late_join_spawning = DHookCreate(offset, HookType_GameRules, ReturnType_Bool, ThisPointer_Ignore, DHook_AllowLateJoinSpawning);
-	DHookAddParam(g_dhook_allow_late_join_spawning, HookParamType_CBaseEntity);
-	
-	delete gameconf;
-	return;
-}
-
-int GameConfGetOffsetOrFail(Handle gameconf, const char[] key){
-	int offset = GameConfGetOffset(gameconf, key);
-	if(offset == -1){
-		delete gameconf;
-		SetFailState("Failed to read gamedata offset of %s", key);
-	}
-	return offset;
-}
-
 public void AdminMenu_Respawn(TopMenu topmenu, TopMenuAction action, TopMenuObject object_id, int client, char[] buffer, int maxlength){
 	switch(action){
 		case TopMenuAction_DisplayOption:{
@@ -153,8 +114,6 @@ public void OnConVarChanged(Handle hConVar, const char[] szOldValue, const char[
 		if(g_bEnable){
 			sv_spawn_grace_objectivecount.IntValue = SPAWN_GRACE_MAX;
 		}
-	}else if(hConVar == g_hCvarsSpawnTimeLimit){
-		g_fSpawnTimeLimit = StringToFloat(szNewValue);
 	}
 	return;
 }
@@ -176,23 +135,19 @@ public Action Command_RespawnMenu(int client, int args){
 public void Event_PlayerSpawn(Event event, const char[] name, bool no_broadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
-	if(IsValidClient(client)){
-		if(IsClientCanSpawn(client)){
-			int iTokens = GetClientTokens(client);
-			SetClientTokens(client, (iTokens > 0)?--iTokens:0);
-		}
+	if(IsValidClient(client))
 		SetClientCanSpawn(client, false);
-	}
-	return;
 }
 
-void RespawnClient(int client){
+bool RespawnClient(int client){
 	if(!IsClientCanSpawn(client)){
-		SetClientCanSpawn(client, true);
-		SetClientTokens(client, GetClientTokens(client) + 1);
-		SetClientNextRespawnTime(client, GetGameTime() + g_fSpawnTimeLimit);
+		int state = GetGameStateEntity();
+		if(IsValidEntity(state)){
+			SetVariantString("!activator");
+			return AcceptEntityInput(state, "RespawnPlayer", client);
+		}
 	}
-	return;
+	return false;
 }
 
 bool IsClientCanSpawn(int client){
@@ -211,13 +166,11 @@ void SetAllCanSpawn(bool enable){
 	return;
 }
 
-void RespawnAll(){
-	for(int client = 1; client <= MaxClients; client++){
-		if(IsValidClient(client) && !IsPlayerAlive(client)){
-			RespawnClient(client);
-		}
-	}
-	return;
+bool RespawnAll(){
+	int state = GetGameStateEntity();
+	if(IsValidEntity(state))
+		return AcceptEntityInput(state, "RespawnAllPlayers");
+	return false;
 }
 
 void TopMenuShowToClient(int client, bool fromAdminMenu = false){
@@ -271,32 +224,16 @@ public int MenuHandle_RespawnTop(Menu menu, MenuAction action, int client, int s
 	return 0;
 }
 
-public MRESReturn DHook_AllowLateJoinSpawning(Handle return_handle, Handle params){
-	MRESReturn result = MRES_Ignored;
-	if(g_bEnable && !DHookIsNullParam(params, 1)){
-		int client = DHookGetParam(params, 1);
-		if(!DHookGetReturn(return_handle) && IsValidClient(client) && IsClientCanSpawn(client)){
-			DHookSetReturn(return_handle, true);
-			result = MRES_Override;
-		}
-	}
-	return result;
-}
-
-int GetClientTokens(int client){
-	return GetEntProp(client, Prop_Send, "m_iTokens");
-}
-
-void SetClientTokens(int client, int tokens){
-	SetEntProp(client, Prop_Send, "m_iTokens", tokens);
-	return;
-}
-
-void SetClientNextRespawnTime(int client, float time){
-	SetEntPropFloat(client, Prop_Send, "_nextRespawnTime", time);
-	return;
-}
-
 bool IsValidClient(int client){
 	return (0 < client <= MaxClients && IsClientInGame(client) && IsClientConnected(client) && !IsFakeClient(client) && !IsClientSourceTV(client));
+}
+
+int GetGameStateEntity(){
+	int nmrih_game_state = -1;
+	while((nmrih_game_state = FindEntityByClassname(nmrih_game_state, "nmrih_game_state")) != -1)
+		return nmrih_game_state;
+	nmrih_game_state = CreateEntityByName("nmrih_game_state");
+	if(IsValidEntity(nmrih_game_state) && DispatchSpawn(nmrih_game_state))
+		return nmrih_game_state;
+	return -1;
 }
